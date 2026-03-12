@@ -127,6 +127,7 @@ function initApp() {
   renderDoctors();
   buildAppointments();
   buildProfile();
+  buildLog();
   generateSlots();
   initChat();
 }
@@ -406,6 +407,7 @@ function saveVitalLog() {
     document.getElementById('bp-badge').textContent = bpStatus === 'Normal' ? '✓ Normal' : '⚠️ ' + bpStatus;
     document.getElementById('bp-badge').className = `badge ${bpStatus === 'Normal' ? 'badge-green' : bpStatus === 'Low' ? 'badge-blue' : 'badge-red'}`;
     HISTORY.unshift({ date: dateStr, type, reading, status: bpStatus, notes });
+    pushLog('vitals','❤️','#fee2e2','Blood Pressure logged', reading + (notes?' — '+notes:''), reading, bpStatus==='Normal'?'badge-green':'badge-yellow', bpStatus);
   } else if (currentLogType === 'sugar') {
     const g = document.getElementById('log-glucose')?.value;
     if (!g) { showToast('⚠️','Enter a value'); return; }
@@ -416,6 +418,7 @@ function saveVitalLog() {
     const sgStatus = parseInt(g) < 70 ? 'Low' : parseInt(g) <= 99 ? 'Normal' : parseInt(g) <= 125 ? 'Elevated' : 'High';
     document.getElementById('sugar-badge').textContent = sgStatus === 'Normal' ? '✓ Normal (Fasting)' : '⚠️ ' + sgStatus;
     HISTORY.unshift({ date: dateStr, type, reading, status: sgStatus, notes });
+    pushLog('vitals','🩸','#fef3c7','Blood Sugar logged', reading + (notes?' — '+notes:''), reading, sgStatus==='Normal'?'badge-green':'badge-red', sgStatus);
   } else if (currentLogType === 'heart') {
     const hr = document.getElementById('log-hr')?.value;
     if (!hr) { showToast('⚠️','Enter a value'); return; }
@@ -709,13 +712,19 @@ function openDoseModal(key, name, time) {
 }
 
 function confirmDose() {
-  if (pendingDoseId) {
-    DOSE_LOG[pendingDoseId] = 'taken';
+  const savedId = pendingDoseId;
+  if (savedId) {
+    DOSE_LOG[savedId] = 'taken';
     pendingDoseId = null;
   }
   closeModal('dose-modal');
   renderTodaySchedule();
   renderAdherence();
+  // Find the medication name for the log
+  const doseKey   = savedId || '';
+  const medId     = parseInt(doseKey.split('_')[0]);
+  const med       = MEDICATIONS.find(m => m.id === medId);
+  if (med) pushLog('meds','💊','#eaf1ff', med.name + ' ' + med.dose + ' taken', med.freq + ' · dose logged', '✓ Taken', 'badge-green', 'Taken');
   showToast('✅','Dose marked as taken!');
 }
 
@@ -792,30 +801,133 @@ async function runCheckerAI() {
     <style>.spin-loader{width:56px;height:56px;border:4px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto}.spin-loader{}</style>
     <style>@keyframes spin{to{transform:rotate(360deg)}}</style>`;
 
-  try {
-    const age      = document.getElementById('c-age').value;
-    const sex      = document.getElementById('c-sex').value;
-    const dur      = document.getElementById('c-duration').value;
-    const sev      = document.getElementById('c-severity').value;
-    const fever    = document.getElementById('c-fever').value;
-    const complaint = document.getElementById('c-complaint').value;
+  // Offline AI — works 100% on GitHub Pages, no API needed
+  setTimeout(() => {
+    renderCheckerResults(analyseSymptoms());
+  }, 2200);
+}
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514', max_tokens: 1000,
-        system: `You are a medical AI. Respond ONLY with valid JSON, no markdown fences. Format:
-{"urgency":"self-care"|"consult"|"urgent"|"emergency","urgency_title":"short title","urgency_msg":"one sentence","conditions":[{"name":"...","probability":85,"tagline":"...","description":"2 sentences.","tags":["tag1","tag2"]}]}
-Return 4-5 conditions ordered by probability descending.`,
-        messages: [{ role:'user', content:`Patient: ${age}yr ${sex}. Complaint: ${complaint}. Symptoms: ${checkerSymptoms.join(', ')}. Duration: ${dur}. Severity: ${sev}/10. Fever: ${fever}.` }]
-      })
-    });
-    const data = await res.json();
-    let txt = data.content[0].text.trim().replace(/```json|```/g,'').trim();
-    renderCheckerResults(JSON.parse(txt));
-  } catch(e) {
-    renderCheckerResults(fallbackResults());
+// ── OFFLINE SYMPTOM ANALYSER ──────────────────────────
+// Matches selected symptoms to conditions using a rule engine
+function analyseSymptoms() {
+  const s    = checkerSymptoms.map(x => x.toLowerCase());
+  const sev  = parseInt(document.getElementById('c-severity').value) || 5;
+  const fever = document.getElementById('c-fever').value;
+  const hasFever = fever === 'Yes';
+
+  // Each condition has weighted symptom matches
+  const CONDITIONS = [
+    {
+      name: 'Viral Upper Respiratory Infection (Common Cold / Flu)',
+      tagline: 'Very common viral illness affecting nose, throat and airways',
+      tags: ['Viral','Common','Self-limiting'],
+      symptoms: ['cough','sore throat','runny nose','fever','fatigue','headache','muscle aches','chills'],
+      weight: 1.0,
+    },
+    {
+      name: 'Tension Headache',
+      tagline: 'Most common type of headache — stress and muscle tension related',
+      tags: ['Neurological','Common','Self-care'],
+      symptoms: ['headache','fatigue','muscle aches','anxiety','dizziness'],
+      weight: 0.9,
+    },
+    {
+      name: 'Hypertension (High Blood Pressure)',
+      tagline: 'Elevated blood pressure that may cause headaches and chest discomfort',
+      tags: ['Cardiovascular','Chronic'],
+      symptoms: ['headache','chest pain','dizziness','blurred vision','high bp','heart palpitations','fatigue'],
+      weight: 0.85,
+    },
+    {
+      name: 'Type 2 Diabetes / Pre-Diabetes',
+      tagline: 'Elevated blood sugar levels with fatigue and frequent urination',
+      tags: ['Metabolic','Chronic','Manageable'],
+      symptoms: ['fatigue','frequent urination','blurred vision','weight loss','numbness','anxiety'],
+      weight: 0.8,
+    },
+    {
+      name: 'Gastroenteritis (Stomach Bug)',
+      tagline: 'Viral or bacterial infection of the digestive system',
+      tags: ['Digestive','Viral/Bacterial'],
+      symptoms: ['nausea','vomiting','diarrhoea','abdominal pain','fever','fatigue','loss of appetite','chills'],
+      weight: 0.9,
+    },
+    {
+      name: 'Anxiety / Panic Disorder',
+      tagline: 'Mental health condition causing physical and emotional symptoms',
+      tags: ['Mental Health','Treatable'],
+      symptoms: ['anxiety','heart palpitations','shortness of breath','chest pain','dizziness','insomnia','fatigue','muscle aches'],
+      weight: 0.8,
+    },
+    {
+      name: 'Anaemia (Low Iron)',
+      tagline: 'Reduced red blood cells causing fatigue and weakness',
+      tags: ['Blood','Nutritional'],
+      symptoms: ['fatigue','dizziness','shortness of breath','heart palpitations','loss of appetite','chills'],
+      weight: 0.75,
+    },
+    {
+      name: 'Migraine',
+      tagline: 'Severe recurring headache often with nausea and light sensitivity',
+      tags: ['Neurological','Recurring'],
+      symptoms: ['headache','nausea','vomiting','blurred vision','dizziness','eye redness'],
+      weight: 0.85,
+    },
+    {
+      name: 'COVID-19 / Viral Infection',
+      tagline: 'Coronavirus or other respiratory viral infection',
+      tags: ['Viral','Respiratory','Test recommended'],
+      symptoms: ['fever','cough','fatigue','muscle aches','shortness of breath','headache','chills','loss of appetite'],
+      weight: 0.9,
+    },
+    {
+      name: 'Urinary Tract Infection (UTI)',
+      tagline: 'Bacterial infection in the urinary tract',
+      tags: ['Bacterial','Urinary','Treatable'],
+      symptoms: ['frequent urination','burning urination','abdominal pain','fever','chills','fatigue'],
+      weight: 0.9,
+    },
+  ];
+
+  // Score each condition
+  const scored = CONDITIONS.map(c => {
+    const matches = c.symptoms.filter(sym => s.some(sel => sel.toLowerCase().includes(sym) || sym.includes(sel)));
+    let score = (matches.length / c.symptoms.length) * 100 * c.weight;
+    if (hasFever && c.symptoms.includes('fever')) score += 8;
+    if (sev >= 7 && ['Hypertension','COVID-19','Gastroenteritis'].some(n => c.name.includes(n))) score += 5;
+    return { ...c, probability: Math.round(Math.min(92, Math.max(8, score))), matched: matches.length };
+  });
+
+  // Sort and take top 4
+  scored.sort((a, b) => b.probability - a.probability);
+  const top = scored.filter(c => c.matched > 0).slice(0, 5);
+  if (top.length === 0) return fallbackResults();
+
+  // Determine urgency
+  const maxP = top[0].probability;
+  const hasChest = s.includes('chest pain');
+  const hasSob   = s.includes('shortness of breath');
+  let urgency = 'self-care', urgency_title = 'Monitor at Home', urgency_msg = 'Your symptoms appear mild. Rest, stay hydrated, and monitor.';
+
+  if (hasChest || (hasSob && hasFever && sev >= 7)) {
+    urgency = 'urgent'; urgency_title = 'Seek Medical Attention Soon';
+    urgency_msg = 'Some of your symptoms may need prompt medical evaluation.';
+  } else if (sev >= 7 || hasFever) {
+    urgency = 'consult'; urgency_title = 'See a Doctor This Week';
+    urgency_msg = 'Your symptoms suggest a medical consultation would be beneficial.';
+  } else if (maxP < 40) {
+    urgency = 'self-care'; urgency_title = 'Self-Care Recommended';
+    urgency_msg = 'Your symptoms appear mild. Rest and home care should help.';
   }
+
+  return {
+    urgency, urgency_title, urgency_msg,
+    conditions: top.map(c => ({
+      name: c.name, probability: c.probability,
+      tagline: c.tagline, description: c.tagline,
+      tags: c.tags
+    }))
+  };
 }
 
 function renderCheckerResults(data) {
@@ -1008,6 +1120,7 @@ function confirmBooking() {
   });
   buildAppointments();
   closeModal('book-modal');
+  pushLog('appts','📅','#eaf1ff','Appointment booked', doc.split('–')[0].trim() + ' · ' + slot.textContent, a.day+' '+a.month, 'badge-green','Confirmed');
   showToast('✅', `Appointment booked with ${doc.split('–')[0].trim()}`);
 }
 
@@ -1047,31 +1160,533 @@ function autoResizeChat(el) {
 }
 function chatKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } }
 
-async function sendChat() {
+// ── OFFLINE HEALTH KNOWLEDGE BASE ──────────────────────
+// Works 100% on GitHub Pages — no server, no API key needed!
+const HEALTH_KB = [
+  {
+    keys: ['blood pressure','bp','hypertension','systolic','diastolic'],
+    reply: `<b>Blood Pressure Guide 🩺</b><br><br>
+<b>Normal ranges:</b><br>
+<ul>
+  <li>✅ <b>Normal:</b> Less than 120/80 mmHg</li>
+  <li>⚠️ <b>Elevated:</b> 120–129 / less than 80</li>
+  <li>⚠️ <b>Stage 1 High:</b> 130–139 / 80–89</li>
+  <li>🚨 <b>Stage 2 High:</b> 140+ / 90+</li>
+  <li>🔵 <b>Low (Hypotension):</b> Below 90/60</li>
+</ul>
+<b>Tips to lower BP:</b> Reduce salt intake, exercise 30 min/day, limit alcohol, manage stress, take medications as prescribed.<br><br>
+⚠️ <i>If BP is consistently above 140/90, see a doctor.</i>`
+  },
+  {
+    keys: ['blood sugar','glucose','diabetes','diabetic','sugar level','hba1c','fasting','post meal'],
+    reply: `<b>Blood Sugar Levels 🩸</b><br><br>
+<b>Fasting glucose:</b><br>
+<ul>
+  <li>✅ <b>Normal:</b> 70–99 mg/dL</li>
+  <li>⚠️ <b>Pre-diabetes:</b> 100–125 mg/dL</li>
+  <li>🚨 <b>Diabetes:</b> 126+ mg/dL</li>
+</ul>
+<b>Post-meal (2 hours after eating):</b><br>
+<ul>
+  <li>✅ <b>Normal:</b> Below 140 mg/dL</li>
+  <li>⚠️ <b>Pre-diabetes:</b> 140–199 mg/dL</li>
+  <li>🚨 <b>Diabetes:</b> 200+ mg/dL</li>
+</ul>
+<b>Foods that help:</b> Leafy greens, whole grains, nuts, cinnamon, bitter gourd, fenugreek.<br><br>
+💡 <i>HbA1c below 5.7% is normal; 5.7–6.4% is pre-diabetes.</i>`
+  },
+  {
+    keys: ['heart rate','pulse','bpm','tachycardia','bradycardia','palpitation','heart beat'],
+    reply: `<b>Heart Rate Information 💓</b><br><br>
+<b>Normal resting heart rate:</b><br>
+<ul>
+  <li>✅ <b>Adults:</b> 60–100 bpm</li>
+  <li>🏃 <b>Athletes:</b> 40–60 bpm (normal for fit people)</li>
+  <li>⚠️ <b>Tachycardia (too fast):</b> Above 100 bpm at rest</li>
+  <li>⚠️ <b>Bradycardia (too slow):</b> Below 60 bpm (if not athletic)</li>
+</ul>
+<b>Causes of high heart rate:</b> Stress, caffeine, dehydration, fever, thyroid issues, exercise.<br>
+<b>Causes of low heart rate:</b> Medications, very fit physique, hypothyroidism.<br><br>
+🚨 <i>Seek emergency care for chest pain + palpitations.</i>`
+  },
+  {
+    keys: ['headache','migraine','head pain','head ache'],
+    reply: `<b>Headache Guide 🤕</b><br><br>
+<b>Common types:</b><br>
+<ul>
+  <li>💧 <b>Tension headache:</b> Stress, poor posture, dehydration</li>
+  <li>🌩️ <b>Migraine:</b> Throbbing, one side, nausea, light sensitivity</li>
+  <li>😤 <b>Cluster headache:</b> Severe pain around one eye</li>
+  <li>🤧 <b>Sinus headache:</b> Facial pressure + congestion</li>
+</ul>
+<b>Quick relief:</b><br>
+<ul>
+  <li>Drink 2 glasses of water</li>
+  <li>Rest in a dark, quiet room</li>
+  <li>Apply cold/warm compress</li>
+  <li>Paracetamol or ibuprofen (if not contraindicated)</li>
+</ul>
+🚨 <i>See a doctor if headache is sudden, severe ("thunderclap"), or with vision changes/numbness.</i>`
+  },
+  {
+    keys: ['fever','temperature','high temperature','pyrexia'],
+    reply: `<b>Fever Guide 🌡️</b><br><br>
+<b>Temperature ranges:</b><br>
+<ul>
+  <li>✅ <b>Normal:</b> 36.1–37.2°C (97–99°F)</li>
+  <li>⚠️ <b>Low fever:</b> 37.3–38°C</li>
+  <li>🔶 <b>Fever:</b> 38–39°C (100.4–102.2°F)</li>
+  <li>🚨 <b>High fever:</b> Above 39.5°C (103°F)</li>
+</ul>
+<b>Home management:</b><br>
+<ul>
+  <li>Stay hydrated (water, coconut water, ORS)</li>
+  <li>Rest and avoid strenuous activity</li>
+  <li>Paracetamol / Ibuprofen as directed</li>
+  <li>Luke-warm sponge bath for very high fever</li>
+</ul>
+🚨 <i>See doctor immediately if fever is above 39.5°C, lasts more than 3 days, or comes with rash/stiff neck.</i>`
+  },
+  {
+    keys: ['cough','cold','flu','sore throat','runny nose','congestion','respiratory'],
+    reply: `<b>Cold & Respiratory Tips 🤧</b><br><br>
+<b>Cold vs Flu:</b><br>
+<ul>
+  <li>🤧 <b>Cold:</b> Gradual, runny nose, mild fever, sore throat</li>
+  <li>🥵 <b>Flu:</b> Sudden, high fever, body aches, fatigue, headache</li>
+</ul>
+<b>Home remedies:</b><br>
+<ul>
+  <li>🍯 Honey + ginger + warm water</li>
+  <li>🧄 Garlic — natural antiviral</li>
+  <li>💧 Steam inhalation for congestion</li>
+  <li>🍋 Vitamin C (citrus fruits, amla)</li>
+  <li>🛌 Rest is the best medicine</li>
+</ul>
+<b>See a doctor if:</b> Fever above 39°C, difficulty breathing, symptoms last more than 10 days.`
+  },
+  {
+    keys: ['bmi','body mass','weight','obese','obesity','overweight','underweight'],
+    reply: `<b>BMI & Weight Guide ⚖️</b><br><br>
+<b>BMI Categories:</b><br>
+<ul>
+  <li>🔵 <b>Underweight:</b> Below 18.5</li>
+  <li>✅ <b>Normal:</b> 18.5 – 24.9</li>
+  <li>⚠️ <b>Overweight:</b> 25 – 29.9</li>
+  <li>🚨 <b>Obese Class I:</b> 30 – 34.9</li>
+  <li>🚨 <b>Obese Class II:</b> 35+</li>
+</ul>
+<b>Healthy weight tips:</b><br>
+<ul>
+  <li>Eat more vegetables, protein, and fibre</li>
+  <li>Exercise at least 150 min/week</li>
+  <li>Cut sugary drinks and processed foods</li>
+  <li>Sleep 7–9 hours (poor sleep causes weight gain)</li>
+</ul>
+💡 <i>Use the BMI Calculator on the Profile page for your exact BMI!</i>`
+  },
+  {
+    keys: ['cholesterol','ldl','hdl','triglyceride','lipid'],
+    reply: `<b>Cholesterol Guide 🫀</b><br><br>
+<b>Normal levels (mg/dL):</b><br>
+<ul>
+  <li>✅ <b>Total cholesterol:</b> Below 200</li>
+  <li>✅ <b>LDL ("bad"):</b> Below 100 (ideal)</li>
+  <li>✅ <b>HDL ("good"):</b> Above 60 (protective)</li>
+  <li>✅ <b>Triglycerides:</b> Below 150</li>
+</ul>
+<b>Lower cholesterol with:</b><br>
+<ul>
+  <li>🫒 Olive oil, nuts, avocado (good fats)</li>
+  <li>🐟 Fish (salmon, mackerel) — omega-3</li>
+  <li>🌾 Oats, beans, soluble fibre</li>
+  <li>🚫 Avoid trans fats, fried foods, red meat excess</li>
+</ul>`
+  },
+  {
+    keys: ['sleep','insomnia','tired','fatigue','exhausted','sleepy','rest'],
+    reply: `<b>Sleep & Fatigue Guide 😴</b><br><br>
+<b>Recommended sleep:</b><br>
+<ul>
+  <li>Adults (18–64): <b>7–9 hours/night</b></li>
+  <li>Elderly (65+): <b>7–8 hours/night</b></li>
+  <li>Teenagers: <b>8–10 hours/night</b></li>
+</ul>
+<b>Better sleep tips:</b><br>
+<ul>
+  <li>📵 No phone/screen 1 hour before bed</li>
+  <li>🕙 Keep a fixed sleep schedule</li>
+  <li>☕ No caffeine after 2 PM</li>
+  <li>🌡️ Keep bedroom cool and dark</li>
+  <li>🧘 Try deep breathing or meditation</li>
+</ul>
+<b>Fatigue causes:</b> Anaemia, thyroid issues, poor sleep, dehydration, depression, diabetes.<br><br>
+⚠️ <i>If fatigue persists for 2+ weeks, see a doctor for blood tests.</i>`
+  },
+  {
+    keys: ['stress','anxiety','mental health','depression','worry','panic','nervous'],
+    reply: `<b>Stress & Mental Health 🧠</b><br><br>
+<b>Signs of stress:</b> Headaches, irritability, poor sleep, muscle tension, digestive issues.<br><br>
+<b>Proven stress relievers:</b><br>
+<ul>
+  <li>🧘 <b>Deep breathing:</b> 4-7-8 method (inhale 4s, hold 7s, exhale 8s)</li>
+  <li>🚶 <b>Walk 20 minutes</b> — nature reduces cortisol by 15%</li>
+  <li>📝 <b>Journaling</b> — write down worries to process them</li>
+  <li>👥 <b>Talk to someone</b> — friend, family, or therapist</li>
+  <li>🎵 <b>Music therapy</b> — calming music lowers heart rate</li>
+</ul>
+⚠️ <i>If you feel hopeless or unable to cope for 2+ weeks, please speak to a mental health professional.</i>`
+  },
+  {
+    keys: ['water','hydration','dehydration','drink','thirst'],
+    reply: `<b>Hydration Guide 💧</b><br><br>
+<b>Daily water intake:</b><br>
+<ul>
+  <li>🧑 <b>Men:</b> ~3.7 litres (about 13 cups)</li>
+  <li>👩 <b>Women:</b> ~2.7 litres (about 9 cups)</li>
+  <li>More if you exercise, it's hot, or you're unwell</li>
+</ul>
+<b>Signs of dehydration:</b><br>
+<ul>
+  <li>Dark yellow urine</li>
+  <li>Headache and dizziness</li>
+  <li>Dry mouth and fatigue</li>
+  <li>Rapid heartbeat</li>
+</ul>
+<b>Hydration tips:</b><br>
+<ul>
+  <li>Start every morning with 2 glasses of water</li>
+  <li>Eat water-rich fruits: watermelon, cucumber, oranges</li>
+  <li>Set hourly reminders on your phone</li>
+</ul>`
+  },
+  {
+    keys: ['vitamin','deficiency','iron','calcium','zinc','b12','vitamin d','anaemia','anemia'],
+    reply: `<b>Common Nutrient Deficiencies 💊</b><br><br>
+<b>Vitamin D deficiency signs:</b> Bone pain, fatigue, mood changes, frequent illness.<br>
+<b>Sources:</b> Sunlight, fatty fish, egg yolks, fortified milk.<br><br>
+<b>Vitamin B12 deficiency signs:</b> Tingling, fatigue, memory issues, pale skin.<br>
+<b>Sources:</b> Meat, eggs, dairy, B12 supplements (especially for vegetarians).<br><br>
+<b>Iron deficiency (Anaemia) signs:</b> Fatigue, pale skin, shortness of breath, cold hands.<br>
+<b>Sources:</b> Red meat, spinach, lentils, fortified cereals, consume with Vitamin C.<br><br>
+<b>Calcium deficiency signs:</b> Weak bones, muscle cramps, brittle nails.<br>
+<b>Sources:</b> Dairy, broccoli, almonds, sesame seeds.<br><br>
+💡 <i>Get blood tests to confirm any deficiency before supplementing.</i>`
+  },
+  {
+    keys: ['exercise','workout','fitness','physical activity','gym','yoga','walk','jogging','run'],
+    reply: `<b>Exercise & Fitness Guide 🏃</b><br><br>
+<b>WHO recommended activity:</b><br>
+<ul>
+  <li>✅ <b>Moderate:</b> 150–300 minutes/week (brisk walk, cycling)</li>
+  <li>✅ <b>Vigorous:</b> 75–150 minutes/week (running, swimming)</li>
+  <li>✅ <b>Strength:</b> 2 days/week minimum</li>
+</ul>
+<b>Best exercises for heart health:</b><br>
+<ul>
+  <li>🚶 Brisk walking — accessible, effective</li>
+  <li>🏊 Swimming — low impact, full body</li>
+  <li>🚴 Cycling — great for cardiovascular</li>
+  <li>🧘 Yoga — reduces BP and stress</li>
+</ul>
+<b>Start simple:</b> 10 minutes/day is better than nothing. Build up gradually.<br><br>
+⚠️ <i>Consult a doctor before starting if you have heart disease or are severely overweight.</i>`
+  },
+  {
+    keys: ['diet','nutrition','food','eat','healthy eating','calories','protein','carb','fat'],
+    reply: `<b>Healthy Diet Guide 🥗</b><br><br>
+<b>Balanced plate (each meal):</b><br>
+<ul>
+  <li>🥦 <b>Half the plate:</b> Vegetables and fruits</li>
+  <li>🌾 <b>Quarter:</b> Whole grains (brown rice, oats, multigrain)</li>
+  <li>🐔 <b>Quarter:</b> Lean protein (dal, chicken, fish, eggs)</li>
+  <li>🥛 <b>Side:</b> Dairy or dairy alternative</li>
+</ul>
+<b>Foods to reduce:</b><br>
+<ul>
+  <li>🚫 Processed/packaged foods</li>
+  <li>🚫 Sugary drinks (soda, packaged juice)</li>
+  <li>🚫 Deep fried foods</li>
+  <li>🚫 White bread and refined carbs</li>
+</ul>
+💡 <i>Eat mindfully. Chew slowly. Stop when 80% full.</i>`
+  },
+  {
+    keys: ['chest pain','angina','heart attack','cardiac'],
+    reply: `<b>⚠️ Chest Pain — Important!</b><br><br>
+Chest pain can have many causes — some serious, some not.<br><br>
+<b>🚨 Call emergency (112) immediately if:</b><br>
+<ul>
+  <li>Chest pain spreading to arm, jaw, or back</li>
+  <li>Crushing or squeezing pressure in chest</li>
+  <li>Shortness of breath + sweating + nausea</li>
+  <li>Sudden dizziness or loss of consciousness</li>
+</ul>
+<b>Less urgent causes:</b> Acid reflux/GERD, muscle strain, anxiety, costochondritis.<br><br>
+🚨 <i><b>Never ignore chest pain. Always get it checked by a doctor.</b></i>`
+  },
+  {
+    keys: ['covid','coronavirus','covid-19','omicron','infection','viral'],
+    reply: `<b>COVID-19 & Viral Infections 🦠</b><br><br>
+<b>Common COVID symptoms:</b><br>
+<ul>
+  <li>Fever, cough, sore throat</li>
+  <li>Loss of smell/taste</li>
+  <li>Body aches, fatigue</li>
+  <li>Shortness of breath (severe cases)</li>
+</ul>
+<b>What to do:</b><br>
+<ul>
+  <li>🏠 Isolate and rest at home for mild cases</li>
+  <li>💧 Stay hydrated, paracetamol for fever</li>
+  <li>🧪 Get tested (RAT or RT-PCR)</li>
+  <li>💉 Keep vaccinations up to date</li>
+</ul>
+🚨 <i>Go to hospital if breathing is difficult, SpO2 drops below 94%, or lips turn blue.</i>`
+  },
+  {
+    keys: ['kidney','renal','urine','urination','uti','bladder','creatinine'],
+    reply: `<b>Kidney Health Guide 🫘</b><br><br>
+<b>Signs of kidney issues:</b><br>
+<ul>
+  <li>Swelling in legs, ankles, feet</li>
+  <li>Foamy or dark urine</li>
+  <li>Reduced urine output</li>
+  <li>Fatigue and nausea</li>
+  <li>High blood pressure</li>
+</ul>
+<b>Protect your kidneys:</b><br>
+<ul>
+  <li>💧 Drink 8+ glasses of water daily</li>
+  <li>🚫 Limit painkillers (NSAIDs damage kidneys)</li>
+  <li>🩺 Control BP and blood sugar</li>
+  <li>🧂 Reduce salt intake</li>
+</ul>
+<b>UTI symptoms:</b> Burning urination, frequent urge to urinate, cloudy urine. Drink plenty of water and see a doctor for antibiotics.`
+  },
+  {
+    keys: ['thyroid','hypothyroid','hyperthyroid','tsh','thyroxine'],
+    reply: `<b>Thyroid Health Guide 🦋</b><br><br>
+<b>Hypothyroidism (underactive):</b><br>
+<ul>
+  <li>Weight gain, fatigue, cold sensitivity</li>
+  <li>Depression, dry skin, hair loss</li>
+  <li>Slow heart rate</li>
+</ul>
+<b>Hyperthyroidism (overactive):</b><br>
+<ul>
+  <li>Weight loss, anxiety, heat sensitivity</li>
+  <li>Rapid heartbeat, trembling hands</li>
+  <li>Bulging eyes (in Graves' disease)</li>
+</ul>
+<b>Normal TSH range:</b> 0.4 – 4.0 mIU/L<br><br>
+💡 <i>A simple blood test (TSH) can diagnose thyroid issues. Very treatable with medication.</i>`
+  },
+  {
+    keys: ['back pain','spine','neck pain','posture','sciatica','lumbar'],
+    reply: `<b>Back & Neck Pain Guide 🦴</b><br><br>
+<b>Most common causes:</b><br>
+<ul>
+  <li>Poor posture (especially sitting all day)</li>
+  <li>Muscle strain from lifting</li>
+  <li>Disc problems</li>
+  <li>Stress and tension</li>
+</ul>
+<b>Home remedies:</b><br>
+<ul>
+  <li>🧊 Ice pack for first 48 hours (reduces inflammation)</li>
+  <li>🔥 Heat pad after 48 hours (relaxes muscles)</li>
+  <li>💊 Ibuprofen / naproxen for pain</li>
+  <li>🧘 Gentle stretching, yoga, walking</li>
+</ul>
+<b>Good posture tips:</b> Screen at eye level, back straight, feet flat on floor, take breaks every 30 min.<br><br>
+⚠️ <i>See a doctor if pain radiates down the leg, or if there is numbness/weakness.</i>`
+  },
+  {
+    keys: ['medication','medicine','drug','tablet','capsule','dose','side effect','antibiotic'],
+    reply: `<b>Medication Tips 💊</b><br><br>
+<b>General rules:</b><br>
+<ul>
+  <li>Always complete the full course of antibiotics</li>
+  <li>Never share medications</li>
+  <li>Store away from heat and moisture</li>
+  <li>Check expiry dates regularly</li>
+  <li>Never crush time-release capsules</li>
+</ul>
+<b>Common mistakes:</b><br>
+<ul>
+  <li>❌ Stopping BP meds when you feel fine (don't!)</li>
+  <li>❌ Taking antibiotics for viral infections (won't help)</li>
+  <li>❌ Doubling dose if you miss one (take it as soon as remembered)</li>
+</ul>
+💡 <i>Use the Medication Tracker page to log your medicines and set reminders!</i>`
+  },
+  {
+    keys: ['eye','vision','eyesight','glasses','contact lens','dry eye','cataract'],
+    reply: `<b>Eye Health Guide 👁️</b><br><br>
+<b>Signs you need glasses:</b> Squinting, headaches after reading, blurry distant vision, eye strain.<br><br>
+<b>Eye care tips:</b><br>
+<ul>
+  <li>📱 Follow the <b>20-20-20 rule:</b> Every 20 min, look at something 20 feet away for 20 seconds</li>
+  <li>💧 Blink more — screens reduce blinking by 60%</li>
+  <li>🥕 Eat Vitamin A rich foods (carrots, sweet potato, spinach)</li>
+  <li>☀️ Wear UV-protection sunglasses outdoors</li>
+  <li>🩺 Get an eye test every 2 years</li>
+</ul>
+<b>Diabetic eye disease:</b> If diabetic, get annual eye check — diabetes can cause blindness if untreated.`
+  },
+  {
+    keys: ['skin','rash','acne','pimple','eczema','psoriasis','itching','dermatology'],
+    reply: `<b>Skin Health Guide 🧴</b><br><br>
+<b>Acne tips:</b><br>
+<ul>
+  <li>Wash face twice daily with gentle cleanser</li>
+  <li>Don't pop pimples — causes scarring</li>
+  <li>Use non-comedogenic moisturiser</li>
+  <li>Salicylic acid or benzoyl peroxide for mild acne</li>
+</ul>
+<b>Rash — when to see a doctor:</b><br>
+<ul>
+  <li>🚨 Rapidly spreading rash</li>
+  <li>🚨 Rash with fever</li>
+  <li>🚨 Difficulty breathing with rash (allergy)</li>
+</ul>
+<b>Healthy skin habits:</b> Stay hydrated, eat antioxidant-rich foods, use SPF 30+ sunscreen daily.<br><br>
+💡 <i>Most skin conditions are treatable — see a dermatologist for persistent issues.</i>`
+  },
+  {
+    keys: ['first aid','emergency','cut','wound','bleed','burn','fracture','sprain','injury'],
+    reply: `<b>First Aid Guide 🩹</b><br><br>
+<b>Cuts & wounds:</b><br>
+<ul>
+  <li>Apply firm pressure with clean cloth</li>
+  <li>Clean with water, apply antiseptic</li>
+  <li>Cover with bandage</li>
+  <li>See doctor if deep, won't stop bleeding, or animal bite</li>
+</ul>
+<b>Burns:</b><br>
+<ul>
+  <li>Cool under running water for 10–20 min</li>
+  <li>Do NOT use ice, butter, or toothpaste</li>
+  <li>Cover loosely with clean bandage</li>
+</ul>
+<b>Emergency numbers:</b><br>
+<ul>
+  <li>🚑 <b>Ambulance (India): 108</b></li>
+  <li>🚑 <b>Police: 100</b></li>
+  <li>🚑 <b>General emergency: 112</b></li>
+</ul>`
+  },
+];
+
+// Greeting patterns
+const GREETINGS = ['hi','hello','hey','good morning','good afternoon','good evening','namaste','hola','how are you'];
+const THANKS    = ['thank','thanks','thank you','helpful','great','awesome','perfect','good'];
+
+function getBotReply(input) {
+  const text = input.toLowerCase().trim();
+
+  // Greetings
+  if (GREETINGS.some(g => text.includes(g))) {
+    return `Hello ${USER.fname}! 👋 I'm <b>Dr. HealthAI</b>, your personal health assistant.<br><br>I can help you with:<br>
+<ul>
+  <li>💓 Blood pressure and heart health</li>
+  <li>🩸 Blood sugar and diabetes</li>
+  <li>😴 Sleep, stress, and mental health</li>
+  <li>💊 Medications and vitamins</li>
+  <li>🏃 Exercise and diet tips</li>
+  <li>🤒 Symptoms like fever, cough, headache</li>
+</ul>
+Just type your question or use the quick topics on the left! What can I help you with today?`;
+  }
+
+  // Thanks
+  if (THANKS.some(t => text.includes(t))) {
+    return `You're very welcome, ${USER.fname}! 😊<br><br>Remember: I'm always here to help. Is there anything else about your health you'd like to know?<br><br><i>⚠️ Reminder: I provide general health information only. For medical diagnosis and treatment, always consult a qualified doctor.</i>`;
+  }
+
+  // Personalised vitals question
+  if (text.includes('my bp') || text.includes('my blood pressure') || text.includes('my reading')) {
+    return `Based on your latest logged reading of <b>118/76 mmHg</b>, your blood pressure is in the <span style="color:var(--green)"><b>Normal range</b></span>! ✅<br><br>
+Normal is anything below 120/80 mmHg. Keep maintaining:<br>
+<ul>
+  <li>Regular exercise</li>
+  <li>Low-salt diet</li>
+  <li>Stress management</li>
+  <li>Regular monitoring</li>
+</ul>
+Keep up the great work! 💪`;
+  }
+
+  if (text.includes('my sugar') || text.includes('my glucose') || text.includes('my blood sugar')) {
+    return `Your latest fasting blood sugar was <b>95 mg/dL</b>, which is <span style="color:var(--green)"><b>Normal</b></span>! ✅<br><br>
+Normal fasting glucose is 70–99 mg/dL. You're doing well!<br><br>
+<b>To keep it in range:</b><br>
+<ul>
+  <li>Avoid sugary foods and drinks</li>
+  <li>Walk for 15–20 minutes after meals</li>
+  <li>Eat high-fibre foods</li>
+  <li>Stay hydrated</li>
+</ul>`;
+  }
+
+  // Match knowledge base
+  for (const kb of HEALTH_KB) {
+    if (kb.keys.some(k => text.includes(k))) {
+      return kb.reply;
+    }
+  }
+
+  // Symptom keywords fallback
+  const symptoms = ['pain','ache','swelling','nausea','vomit','dizziness','dizzy','breathless','weakness','numbness','tingling'];
+  if (symptoms.some(s => text.includes(s))) {
+    return `I understand you're not feeling well. Here's what I'd suggest:<br><br>
+<b>General steps when you have symptoms:</b><br>
+<ul>
+  <li>📝 Note when symptoms started and how severe (1–10)</li>
+  <li>💧 Stay hydrated and get rest</li>
+  <li>🌡️ Check your temperature</li>
+  <li>🔍 Use the <b>Symptom Checker</b> page for a more detailed analysis</li>
+  <li>👨‍⚕️ If symptoms are severe or worsening, see a doctor</li>
+</ul>
+🚨 <i>For chest pain, difficulty breathing, or sudden severe symptoms — call emergency services (112) immediately.</i><br><br>
+Would you like me to explain more about any specific symptom?`;
+  }
+
+  // Default helpful response
+  return `That's a great health question! Here are some topics I can help you with right now:<br><br>
+<ul>
+  <li>❤️ <b>Blood pressure</b> — type "blood pressure"</li>
+  <li>🩸 <b>Blood sugar / diabetes</b> — type "blood sugar"</li>
+  <li>💊 <b>Medications</b> — type "medication"</li>
+  <li>🏃 <b>Exercise tips</b> — type "exercise"</li>
+  <li>🥗 <b>Diet & nutrition</b> — type "diet"</li>
+  <li>😴 <b>Sleep issues</b> — type "sleep"</li>
+  <li>🤕 <b>Headache / fever / cough</b> — just type the symptom!</li>
+</ul>
+Or click any <b>Quick Topic</b> button on the left sidebar. What would you like to know?`;
+}
+
+function sendChat() {
   const inp  = document.getElementById('chat-input');
   const text = inp.value.trim();
   if (!text) return;
   inp.value = ''; inp.style.height = 'auto';
   addChatMsg('user', text.replace(/\n/g,'<br>'));
-  chatHistory.push({ role:'user', content:text });
+
   document.getElementById('chat-send').disabled = true;
   showTyping();
-  try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:600, system:CHAT_SYSTEM, messages:chatHistory })
-    });
-    const data = await res.json();
+
+  // Simulate realistic typing delay (600–1400ms based on reply length)
+  const reply = getBotReply(text);
+  const delay = Math.min(1400, 600 + reply.length * 0.8);
+
+  setTimeout(() => {
     removeTyping();
-    const reply = data.content[0].text;
-    chatHistory.push({ role:'assistant', content:reply });
     addChatMsg('bot', reply);
-  } catch(e) {
-    removeTyping();
-    addChatMsg('bot','⚠️ Connection error. Please check your internet and try again.');
-  }
-  document.getElementById('chat-send').disabled = false;
-  document.getElementById('chat-input').focus();
+    document.getElementById('chat-send').disabled = false;
+    document.getElementById('chat-input').focus();
+  }, delay);
 }
 
 function sendQuickChat(text) {
@@ -1306,8 +1921,132 @@ function exportPDF() {
 }
 
 // ════════════════════════════════════════════
-// MODAL HELPERS
+// ACTIVITY LOG
 // ════════════════════════════════════════════
+
+// Master log — every action the user takes gets added here
+const ACTIVITY_LOG = [
+  // Today
+  { date:'2025-03-12', time:'09:15 AM', type:'vitals', icon:'❤️',  iconBg:'#fee2e2', title:'Blood Pressure logged',        sub:'Reading: 118/76 mmHg',           val:'118/76',    badge:'badge-green',  status:'Normal'  },
+  { date:'2025-03-12', time:'09:00 AM', type:'vitals', icon:'🩸',  iconBg:'#fef3c7', title:'Blood Sugar logged',           sub:'Fasting — 95 mg/dL',             val:'95 mg/dL',  badge:'badge-green',  status:'Normal'  },
+  { date:'2025-03-12', time:'08:30 AM', type:'meds',   icon:'💊',  iconBg:'#eaf1ff', title:'Metformin 500mg taken',        sub:'Morning dose — 8:00 AM',         val:'✓ Taken',   badge:'badge-green',  status:'Taken'   },
+  { date:'2025-03-12', time:'08:30 AM', type:'meds',   icon:'💊',  iconBg:'#eaf1ff', title:'Vitamin D3 1000IU taken',      sub:'Morning dose — 8:00 AM',         val:'✓ Taken',   badge:'badge-green',  status:'Taken'   },
+  { date:'2025-03-12', time:'08:00 AM', type:'good',   icon:'🌅',  iconBg:'#dcfce7', title:'Good morning, John!',          sub:'Logged in to HealthAI',          val:'',          badge:'',             status:''        },
+
+  // Yesterday
+  { date:'2025-03-11', time:'08:30 PM', type:'vitals', icon:'❤️',  iconBg:'#fee2e2', title:'Blood Pressure logged',        sub:'Evening — 128/84 mmHg',          val:'128/84',    badge:'badge-yellow', status:'Elevated'},
+  { date:'2025-03-11', time:'08:00 PM', type:'meds',   icon:'💊',  iconBg:'#eaf1ff', title:'Metformin 500mg taken',        sub:'Evening dose — 8:00 PM',         val:'✓ Taken',   badge:'badge-green',  status:'Taken'   },
+  { date:'2025-03-11', time:'01:00 PM', type:'vitals', icon:'🩸',  iconBg:'#fef3c7', title:'Blood Sugar logged',           sub:'Post-meal — 138 mg/dL',          val:'138 mg/dL', badge:'badge-red',    status:'High'    },
+  { date:'2025-03-11', time:'09:30 AM', type:'appts',  icon:'📅',  iconBg:'#eaf1ff', title:'Appointment confirmed',        sub:'Dr. Priya Sharma — 18 Mar',      val:'18 MAR',    badge:'badge-blue',   status:'Confirmed'},
+  { date:'2025-03-11', time:'08:30 AM', type:'meds',   icon:'💊',  iconBg:'#eaf1ff', title:'Amlodipine 5mg taken',         sub:'Morning dose — 9:00 AM',         val:'✓ Taken',   badge:'badge-green',  status:'Taken'   },
+
+  // 2 days ago
+  { date:'2025-03-10', time:'10:00 AM', type:'vitals', icon:'💓',  iconBg:'#ffe4e4', title:'Heart Rate logged',            sub:'Resting — 72 bpm',               val:'72 bpm',    badge:'badge-green',  status:'Normal'  },
+  { date:'2025-03-10', time:'09:00 AM', type:'vitals', icon:'💨',  iconBg:'#e0f8f8', title:'SpO2 logged',                  sub:'Oxygen saturation — 98%',        val:'98%',       badge:'badge-green',  status:'Excellent'},
+  { date:'2025-03-10', time:'08:30 AM', type:'meds',   icon:'💊',  iconBg:'#eaf1ff', title:'All morning medications taken',sub:'3 medications logged',           val:'✓ 3 doses', badge:'badge-green',  status:'Taken'   },
+  { date:'2025-03-10', time:'07:00 AM', type:'alerts', icon:'⚠️',  iconBg:'#fef3c7', title:'High sugar alert',             sub:'Post-meal reading was above 130', val:'138 mg/dL', badge:'badge-yellow', status:'Alert'   },
+
+  // 3 days ago
+  { date:'2025-03-09', time:'08:00 AM', type:'vitals', icon:'🌡️', iconBg:'#ffedd5', title:'Temperature logged',           sub:'Normal — 36.8°C',                val:'36.8°C',    badge:'badge-green',  status:'Normal'  },
+  { date:'2025-03-09', time:'07:45 AM', type:'vitals', icon:'⚖️',  iconBg:'#ede9fe', title:'Weight logged',               sub:'Morning — 72 kg',                val:'72 kg',     badge:'badge-green',  status:'Normal'  },
+  { date:'2025-03-09', time:'07:00 AM', type:'appts',  icon:'📋',  iconBg:'#eaf1ff', title:'Symptom check completed',     sub:'4 symptoms analysed — Mild cold', val:'Self-care', badge:'badge-blue',   status:'Done'    },
+];
+
+let currentLogFilter = 'all';
+
+function buildLog() {
+  renderLogStats();
+  renderLogTimeline(currentLogFilter);
+}
+
+function filterLog(type, btn) {
+  currentLogFilter = type;
+  document.querySelectorAll('.log-filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderLogTimeline(type);
+}
+
+function renderLogStats() {
+  const stats = [
+    { icon:'📝', bg:'#eaf1ff', val: ACTIVITY_LOG.length,                                              lbl:'Total Entries' },
+    { icon:'💓', bg:'#fee2e2', val: ACTIVITY_LOG.filter(e=>e.type==='vitals').length + HISTORY.length, lbl:'Vitals Logged' },
+    { icon:'💊', bg:'#eaf1ff', val: ACTIVITY_LOG.filter(e=>e.type==='meds').length,                   lbl:'Doses Taken'   },
+    { icon:'⚠️', bg:'#fef3c7', val: ACTIVITY_LOG.filter(e=>e.type==='alerts').length,                 lbl:'Health Alerts' },
+  ];
+  document.getElementById('log-stats').innerHTML = stats.map(s => `
+    <div class="log-stat-card">
+      <div class="log-stat-icon" style="background:${s.bg}">${s.icon}</div>
+      <div>
+        <div class="log-stat-val">${s.val}</div>
+        <div class="log-stat-lbl">${s.lbl}</div>
+      </div>
+    </div>`).join('');
+}
+
+function renderLogTimeline(filter) {
+  const el = document.getElementById('log-timeline');
+  const entries = filter === 'all'
+    ? ACTIVITY_LOG
+    : ACTIVITY_LOG.filter(e => e.type === filter);
+
+  if (!entries.length) {
+    el.innerHTML = `<div class="log-empty">
+      <div class="log-empty-icon">📭</div>
+      <div class="log-empty-text">No ${filter} entries yet.</div>
+      <div style="font-size:13px;margin-top:8px;color:var(--dim)">Start logging your vitals or medications to see entries here.</div>
+    </div>`;
+    return;
+  }
+
+  // Group by date
+  const groups = {};
+  entries.forEach(e => {
+    if (!groups[e.date]) groups[e.date] = [];
+    groups[e.date].push(e);
+  });
+
+  const today     = new Date().toISOString().slice(0,10);
+  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0,10);
+
+  el.innerHTML = Object.entries(groups).map(([date, items]) => {
+    const label = date === today ? '📅 Today' : date === yesterday ? '📅 Yesterday' : '📅 ' + new Date(date).toLocaleDateString('en-IN', { weekday:'long', day:'numeric', month:'long' });
+
+    const rows = items.map((e, i) => `
+      <div class="log-entry" data-type="${e.type}">
+        <div class="log-line-col">
+          <div class="log-dot ${e.type}"></div>
+          ${i < items.length - 1 ? '<div class="log-line"></div>' : ''}
+        </div>
+        <div class="log-entry-card">
+          <div class="log-entry-icon" style="background:${e.iconBg}">${e.icon}</div>
+          <div class="log-entry-body">
+            <div class="log-entry-title">${e.title}</div>
+            <div class="log-entry-sub">${e.sub}</div>
+          </div>
+          ${e.val ? `<div class="log-entry-val" style="color:var(--primary)">${e.val}</div>` : ''}
+          ${e.badge ? `<span class="badge ${e.badge}">${e.status}</span>` : ''}
+          <div class="log-entry-time">${e.time}</div>
+        </div>
+      </div>`).join('');
+
+    return `<div class="log-day-group">
+      <div class="log-day-label">${label}</div>
+      ${rows}
+    </div>`;
+  }).join('');
+}
+
+// Push a new entry into the log (called when user logs a vital, takes a dose, etc.)
+function pushLog(type, icon, iconBg, title, sub, val, badge, status) {
+  const now  = new Date();
+  const date = now.toISOString().slice(0,10);
+  const time = now.toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' });
+  ACTIVITY_LOG.unshift({ date, time, type, icon, iconBg, title, sub, val, badge, status });
+  if (currentLogFilter !== undefined) renderLogTimeline(currentLogFilter);
+  renderLogStats();
+}
+
+
 function openModal(id)  { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 function modalOutside(e, id) { if (e.target === document.getElementById(id)) closeModal(id); }
