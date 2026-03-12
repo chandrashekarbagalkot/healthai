@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>HealthAI – Smart Health Platform</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+<div id="toast"><span id="toast-icon"></span><span id="toast-msg"></span></div>
+
+<!-- ═══ LOGIN ═══ -->
+<div id="page-login" class="auth-page active">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <div class="logo-mark">🩺</div>
+      <h2>HealthAI</h2>
+      <p>Your smart personal health companion</p>
+    </div>
+    <div class="field"><label>Email Address</label><input type="email" id="login-email" value="demo@healthai.com" placeholder="demo@healthai.com"/></div>
+    <div class="field"><label>Password</label><input type="password" id="login-pass" value="password" placeholder="••••••••"/></div>
+    <button class="btn btn-primary btn-full" onclick="doLogin()">Sign In →</button>
+    <div class="auth-divider">or</div>
+    <button class="btn btn-ghost btn-full" onclick="doLogin()">🚀 Continue as Demo User</button>
+    <div class="auth-footer">Don't have an account? <a onclick="showAuthPage('page-register')">Create one free</a></div>
+  </div>
+</div>
+
+<!-- ═══ REGISTER ═══ -->
+<div id="page-register" class="auth-page">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <div class="logo-mark">🩺</div>
+      <h2>Create Account</h2>
+      <p>Join HealthAI — free forever</p>
+    </div>
+    <div class="form-row-2">
+      <div class="field"><label>First Name</label><input type="text" id="reg-fname" placeholder="John"/></div>
+      <div class="field"><label>Last Name</label><input type="text" id="reg-lname" placeholder="Doe"/></div>
+    </div>
+    <div class="field"><label>Email</label><input type="email" id="reg-email" placeholder="you@example.com"/></div>
+    <div class="field"><label>Password</label><input type="password" id="reg-pass" placeholder="Create a password"/></div>
+    <div class="form-row-2">
+      <div class="field"><label>Age</label><input type="number" id="reg-age" placeholder="28"/></div>
+      <div class="field"><label>Sex</label>
+        <select id="reg-sex"><option value="">Select…</option><option>Male</option><option>Female</option><option>Other</option></select>
+      </div>
+    </div>
+    <div class="form-row-2">
+      <div class="field"><label>Blood Group</label>
+        <select id="reg-blood"><option value="">Select…</option><option>A+</option><option>A−</option><option>B+</option><option>B−</option><option>AB+</option><option>AB−</option><option>O+</option><option>O−</option></select>
+      </div>
+      <div class="field"><label>Height (cm)</label><input type="number" id="reg-height" placeholder="170"/></div>
+    </div>
+    <button class="btn btn-primary btn-full" onclick="doRegister()">Create Account →</button>
+    <div class="auth-footer">Already have an account? <a onclick="showAuthPage('page-login')">Sign in</a></div>
+  </div>
+</div>
+
+<!-- ═══ MAIN APP ═══ -->
+<div id="app" class="hidden">
+
+  <nav id="main-nav">
+    <div class="nav-logo" onclick="navigate('dashboard')">HealthAI<span>.io</span><span class="nav-pill">AI</span></div>
+    <div class="nav-menu">
+      <div class="nav-item active" id="nav-dashboard"    onclick="navigate('dashboard')">🏠 Dashboard</div>
+      <div class="nav-item"        id="nav-vitals"       onclick="navigate('vitals')">💓 Vitals</div>
+      <div class="nav-item"        id="nav-trends"       onclick="navigate('trends')">📈 Trends</div>
+      <div class="nav-item"        id="nav-meds"         onclick="navigate('meds')">💊 Meds</div>
+      <div class="nav-item"        id="nav-checker"      onclick="navigate('checker')">🔍 Symptoms</div>
+      <div class="nav-item"        id="nav-doctors"      onclick="navigate('doctors')">👨‍⚕️ Doctors</div>
+      <div class="nav-item"        id="nav-appointments" onclick="navigate('appointments')">📅 Appts</div>
+      <div class="nav-item"        id="nav-chat"         onclick="navigate('chat')">🤖 AI Chat</div>
+    </div>
+    <div class="nav-right">
+      <button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="Toggle dark mode">🌙</button>
+      <button class="btn btn-outline btn-sm" onclick="exportPDF()">📄 PDF</button>
+      <div class="nav-user" onclick="navigate('profile')">
+        <div class="avatar" id="nav-avatar">J</div>
+        <span class="nav-uname" id="nav-uname">John D.</span>
+      </div>
+    </div>
+  </nav>
+
+  <!-- DASHBOARD -->
+  <section id="section-dashboard" class="app-section active">
+    <div class="page-wrap">
+      <div class="page-header">
+        <h1 id="dash-greeting">Good morning, John! 👋</h1>
+        <p>Here's your complete health overview for today</p>
+      </div>
+      <div class="stat-grid" id="dash-stats"></div>
+      <div class="quick-actions" id="quick-actions"></div>
+      <div class="grid-2">
+        <div class="card"><div class="card-title">📈 Weekly BP</div><canvas id="dash-bp-chart" height="110"></canvas></div>
+        <div class="card"><div class="card-title">🩸 Weekly Sugar</div><canvas id="dash-sugar-chart" height="110"></canvas></div>
+      </div>
+      <div class="card" style="margin-top:20px"><div class="card-title">🕐 Recent Activity</div><div id="activity-feed"></div></div>
+    </div>
+  </section>
+
+  <!-- VITALS -->
+  <section id="section-vitals" class="app-section">
+    <div class="page-wrap">
+      <div class="page-header"><h1>💓 Health Vitals Monitor</h1><p>Track and log all your vital signs</p></div>
+      <div class="vitals-grid" id="vital-panels"></div>
+      <div class="grid-3" id="more-vitals" style="margin-bottom:28px"></div>
+      <div class="card">
+        <div class="card-title-row">
+          <span class="card-title" style="margin-bottom:0">📋 Readings History</span>
+          <button class="btn btn-ghost btn-sm" onclick="exportCSV()">⬇️ CSV</button>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>Date &amp; Time</th><th>Type</th><th>Reading</th><th>Status</th><th>Notes</th></tr></thead>
+            <tbody id="history-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TRENDS -->
+  <section id="section-trends" class="app-section">
+    <div class="page-wrap">
+      <div class="page-header"><h1>📈 Health Trends &amp; Graphs</h1><p>Visualise your vitals over time</p></div>
+      <div class="trend-controls">
+        <button class="range-btn active" onclick="setRange(7,this)">7 Days</button>
+        <button class="range-btn" onclick="setRange(14,this)">14 Days</button>
+        <button class="range-btn" onclick="setRange(30,this)">30 Days</button>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title">❤️ Blood Pressure (mmHg)</div>
+          <canvas id="bp-trend-chart" height="180"></canvas>
+          <div class="chart-legend"><span class="ldot" style="background:#ef4444"></span>Systolic <span class="ldot" style="background:#3b82f6;margin-left:12px"></span>Diastolic</div>
+        </div>
+        <div class="card">
+          <div class="card-title">🩸 Blood Sugar (mg/dL)</div>
+          <canvas id="sugar-trend-chart" height="180"></canvas>
+          <div class="chart-legend"><span class="ldot" style="background:#f59e0b"></span>Fasting <span class="ldot" style="background:#8b5cf6;margin-left:12px"></span>Post-meal</div>
+        </div>
+        <div class="card">
+          <div class="card-title">💓 Heart Rate (bpm)</div>
+          <canvas id="hr-trend-chart" height="180"></canvas>
+        </div>
+        <div class="card">
+          <div class="card-title">⚖️ Weight (kg)</div>
+          <canvas id="weight-trend-chart" height="180"></canvas>
+        </div>
+      </div>
+      <div class="card" style="margin-top:20px">
+        <div class="card-title">📊 Period Statistics</div>
+        <div class="stats-summary" id="trend-stats"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- MEDICATIONS -->
+  <section id="section-meds" class="app-section">
+    <div class="page-wrap">
+      <div class="page-header"><h1>💊 Medication Tracker</h1><p>Manage medications, set reminders, and track doses</p></div>
+      <div class="card" style="margin-bottom:24px">
+        <div class="card-title">➕ Add New Medication</div>
+        <div class="form-row-3">
+          <div class="field"><label>Medication Name</label><input type="text" id="med-name" placeholder="e.g. Metformin"/></div>
+          <div class="field"><label>Dosage</label><input type="text" id="med-dose" placeholder="e.g. 500mg"/></div>
+          <div class="field"><label>Frequency</label>
+            <select id="med-freq"><option>Once daily</option><option>Twice daily</option><option>Three times daily</option><option>Every 8 hours</option><option>Weekly</option><option>As needed</option></select>
+          </div>
+        </div>
+        <div class="form-row-3">
+          <div class="field"><label>Time(s)</label><input type="text" id="med-time" placeholder="e.g. 8:00 AM, 8:00 PM"/></div>
+          <div class="field"><label>Start Date</label><input type="date" id="med-start"/></div>
+          <div class="field"><label>End Date (optional)</label><input type="date" id="med-end"/></div>
+        </div>
+        <div class="field"><label>Instructions / Notes</label><input type="text" id="med-notes" placeholder="e.g. Take with food…"/></div>
+        <button class="btn btn-primary" onclick="addMedication()">+ Add Medication</button>
+      </div>
+      <div class="grid-2">
+        <div><h3 class="section-sub">📅 Today's Schedule</h3><div id="med-today"></div></div>
+        <div><h3 class="section-sub">💊 All Medications</h3><div id="med-list"></div></div>
+      </div>
+      <div class="card" style="margin-top:24px">
+        <div class="card-title">📊 Weekly Adherence</div>
+        <div class="adherence-grid" id="adherence-grid"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SYMPTOM CHECKER -->
+  <section id="section-checker" class="app-section">
+    <div class="page-wrap">
+      <div class="page-header"><h1>🔍 AI Symptom Checker</h1><p>Get an AI-powered analysis of your symptoms</p></div>
+      <div class="checker-tabs">
+        <div class="c-tab active" id="ctab-1"><div class="c-tab-num">1</div>Basic Info</div>
+        <div class="c-tab" id="ctab-2"><div class="c-tab-num">2</div>Symptoms</div>
+        <div class="c-tab" id="ctab-3"><div class="c-tab-num">3</div>Details</div>
+        <div class="c-tab" id="ctab-4"><div class="c-tab-num">4</div>Results</div>
+      </div>
+      <div id="csec-1" class="checker-sec active card">
+        <h3 class="sec-title">Tell us about yourself</h3>
+        <div class="form-row-2">
+          <div class="field"><label>Age</label><input type="number" id="c-age" placeholder="28"/></div>
+          <div class="field"><label>Sex</label><select id="c-sex"><option value="">Select…</option><option>Male</option><option>Female</option></select></div>
+        </div>
+        <div class="field"><label>Primary complaint</label><input type="text" id="c-complaint" placeholder="e.g. headache and fatigue"/></div>
+        <div class="align-right"><button class="btn btn-primary" onclick="checkerNext(1)">Next →</button></div>
+      </div>
+      <div id="csec-2" class="checker-sec card">
+        <h3 class="sec-title">Select your symptoms</h3>
+        <p class="sec-sub">Tap to select / deselect</p>
+        <div class="sym-grid" id="sym-grid"></div>
+        <div class="nav-row">
+          <button class="btn btn-ghost" onclick="checkerPrev(2)">← Back</button>
+          <button class="btn btn-primary" onclick="checkerNext(2)">Next →</button>
+        </div>
+      </div>
+      <div id="csec-3" class="checker-sec card">
+        <h3 class="sec-title">A few more details</h3>
+        <div class="field"><label>Duration</label>
+          <select id="c-duration"><option value="">Select…</option><option>Less than 24 hours</option><option>1–3 days</option><option>4–7 days</option><option>1–2 weeks</option><option>More than 2 weeks</option></select>
+        </div>
+        <div class="field"><label>Severity: <strong id="sev-show">5</strong>/10</label>
+          <input type="range" id="c-severity" min="1" max="10" value="5" oninput="document.getElementById('sev-show').textContent=this.value"/>
+        </div>
+        <div class="field"><label>Fever?</label>
+          <select id="c-fever"><option value="">Select…</option><option>Yes</option><option>No</option><option>Not sure</option></select>
+        </div>
+        <div class="nav-row">
+          <button class="btn btn-ghost" onclick="checkerPrev(3)">← Back</button>
+          <button class="btn btn-primary" onclick="runCheckerAI()">🤖 Analyse →</button>
+        </div>
+      </div>
+      <div id="csec-4" class="checker-sec"><div id="checker-results"></div></div>
+    </div>
+  </section>
+
+  <!-- DOCTORS -->
+  <section id="section-doctors" class="app-section">
+    <div class="page-wrap">
+      <div class="page-header"><h1>👨‍⚕️ Find a Doctor</h1><p>Search our network of verified healthcare professionals</p></div>
+      <div class="filter-bar">
+        <input type="text" id="doc-search" placeholder="🔍 Search by name…" oninput="renderDoctors()"/>
+        <select id="doc-spec" onchange="renderDoctors()">
+          <option value="">All Specialties</option>
+          <option>General Physician</option><option>Cardiologist</option><option>Endocrinologist</option>
+          <option>Neurologist</option><option>Dermatologist</option><option>Pulmonologist</option>
+        </select>
+        <select id="doc-avail" onchange="renderDoctors()">
+          <option value="">Any Availability</option><option>Available Today</option><option>This Week</option>
+        </select>
+      </div>
+      <div id="doctors-list"></div>
+    </div>
+  </section>
+
+  <!-- APPOINTMENTS -->
+  <section id="section-appointments" class="app-section">
+    <div class="page-wrap">
+      <div class="page-header"><h1>📅 Appointments</h1><p>Manage and book your doctor appointments</p></div>
+      <div class="grid-2">
+        <div>
+          <div class="section-hrow">
+            <h3 class="section-sub">Upcoming</h3>
+            <button class="btn btn-primary btn-sm" onclick="openModal('book-modal')">+ Book New</button>
+          </div>
+          <div id="appt-list"></div>
+        </div>
+        <div class="card"><div class="card-title">📊 Stats</div><div id="appt-stats"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- AI CHAT -->
+  <section id="section-chat" class="app-section">
+    <div class="page-wrap" style="padding-bottom:20px">
+      <div class="page-header"><h1>🤖 AI Health Assistant</h1><p>Chat with your AI doctor — available 24/7</p></div>
+      <div class="chat-layout">
+        <div class="chat-sidebar">
+          <div class="sidebar-label">Quick Topics</div>
+          <div class="chat-topic" onclick="sendQuickChat('What is a normal blood pressure range?')">📊 BP ranges</div>
+          <div class="chat-topic" onclick="sendQuickChat('How do I manage diabetes with diet?')">🍎 Diabetes diet</div>
+          <div class="chat-topic" onclick="sendQuickChat('What exercises are best for heart health?')">🏃 Heart exercises</div>
+          <div class="chat-topic" onclick="sendQuickChat('What are signs of vitamin D deficiency?')">☀️ Vitamin D</div>
+          <div class="chat-topic" onclick="sendQuickChat('How much water should I drink daily?')">💧 Daily water</div>
+          <div class="chat-topic" onclick="sendQuickChat('What foods lower blood sugar naturally?')">🥦 Lower blood sugar</div>
+          <div class="chat-topic" onclick="sendQuickChat('What causes high blood pressure?')">❤️ High BP causes</div>
+          <div class="chat-topic" onclick="sendQuickChat('How do I improve my sleep quality?')">😴 Better sleep</div>
+        </div>
+        <div class="chat-main">
+          <div class="chat-topbar">
+            <div class="chat-bot-av">🤖</div>
+            <div><div class="chat-bot-name">Dr. HealthAI</div><div class="chat-bot-status"><span class="status-dot"></span>Online</div></div>
+            <span class="badge badge-blue" style="margin-left:auto">AI Powered</span>
+          </div>
+          <div class="chat-messages" id="chat-messages"></div>
+          <div class="chat-input-area">
+            <div class="chat-input-row">
+              <textarea id="chat-input" rows="1" placeholder="Ask anything about your health…" oninput="autoResizeChat(this)" onkeydown="chatKey(event)"></textarea>
+              <button id="chat-send" onclick="sendChat()">➤</button>
+            </div>
+            <div class="chat-hint">Enter to send · Shift+Enter for new line</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PROFILE -->
+  <section id="section-profile" class="app-section">
+    <div class="page-wrap">
+      <div class="profile-hero">
+        <div class="profile-av-lg" id="profile-avatar">J</div>
+        <div class="profile-hero-info">
+          <div class="profile-name" id="profile-name">John Doe</div>
+          <div class="profile-sub" id="profile-sub">28 years · Male · O+</div>
+        </div>
+        <button class="btn btn-white-outline" onclick="exportPDF()">📄 Export PDF Report</button>
+      </div>
+      <div class="grid-2">
+        <div class="card"><div class="card-title">👤 Personal Info</div><div id="profile-info"></div></div>
+        <div class="card"><div class="card-title">📊 Health Summary</div><div id="profile-health"></div></div>
+      </div>
+      <div class="card" style="margin-top:20px">
+        <div class="card-title">⚖️ BMI Calculator</div>
+        <div class="grid-2">
+          <div>
+            <div class="form-row-2">
+              <div class="field"><label>Height (cm)</label><input type="number" id="bmi-h" placeholder="170" oninput="calcBMI()"/></div>
+              <div class="field"><label>Weight (kg)</label><input type="number" id="bmi-w" placeholder="70" oninput="calcBMI()"/></div>
+            </div>
+            <div id="bmi-result"></div>
+          </div>
+          <div id="bmi-info"></div>
+        </div>
+      </div>
+      <div style="text-align:right;margin-top:20px">
+        <button class="btn btn-ghost btn-sm" onclick="doLogout()">🚪 Sign Out</button>
+      </div>
+    </div>
+  </section>
+
+</div><!-- end #app -->
+
+<!-- MODALS -->
+<div class="modal-overlay" id="book-modal" onclick="modalOutside(event,'book-modal')">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('book-modal')">✕</button>
+    <h3>📅 Book Appointment</h3>
+    <p class="modal-sub">Select a doctor, date, and time slot</p>
+    <div class="field"><label>Doctor</label>
+      <select id="book-doctor">
+        <option>Dr. Priya Sharma – Cardiologist</option>
+        <option>Dr. Arjun Mehta – General Physician</option>
+        <option>Dr. Kavita Rao – Endocrinologist</option>
+        <option>Dr. Rohan Patel – Neurologist</option>
+      </select>
+    </div>
+    <div class="field"><label>Date</label><input type="date" id="book-date"/></div>
+    <div class="field"><label>Time Slot</label><div class="time-slots" id="book-slots"></div></div>
+    <div class="field"><label>Reason</label><input type="text" id="book-reason" placeholder="e.g. routine checkup…"/></div>
+    <button class="btn btn-primary btn-full" onclick="confirmBooking()">Confirm ✓</button>
+  </div>
+</div>
+
+<div class="modal-overlay" id="log-modal" onclick="modalOutside(event,'log-modal')">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('log-modal')">✕</button>
+    <h3 id="log-modal-title">Log Reading</h3>
+    <p class="modal-sub" id="log-modal-desc">Enter your measurement</p>
+    <div id="log-modal-fields"></div>
+    <div class="field"><label>Notes (optional)</label><input type="text" id="log-notes" placeholder="e.g. after exercise…"/></div>
+    <button class="btn btn-primary btn-full" onclick="saveVitalLog()">Save ✓</button>
+  </div>
+</div>
+
+<div class="modal-overlay" id="dose-modal" onclick="modalOutside(event,'dose-modal')">
+  <div class="modal-box" style="text-align:center;padding:40px 32px">
+    <div style="font-size:48px;margin-bottom:12px">💊</div>
+    <h3 id="dose-title">Mark Dose Taken</h3>
+    <p class="modal-sub" id="dose-desc">Confirm you have taken this medication</p>
+    <div style="display:flex;gap:12px;margin-top:20px">
+      <button class="btn btn-ghost btn-full" onclick="closeModal('dose-modal')">Cancel</button>
+      <button class="btn btn-success btn-full" onclick="confirmDose()">✓ Taken</button>
+    </div>
+  </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
