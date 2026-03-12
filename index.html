@@ -74,6 +74,7 @@
       <div class="nav-item"        id="nav-checker"      onclick="navigate('checker')">🔍 Symptoms</div>
       <div class="nav-item"        id="nav-doctors"      onclick="navigate('doctors')">👨‍⚕️ Doctors</div>
       <div class="nav-item"        id="nav-appointments" onclick="navigate('appointments')">📅 Appts</div>
+      <div class="nav-item"        id="nav-log"          onclick="navigate('log')">📋 Log</div>
       <div class="nav-item"        id="nav-chat"         onclick="navigate('chat')">🤖 AI Chat</div>
     </div>
     <div class="nav-right">
@@ -273,6 +274,32 @@
         </div>
         <div class="card"><div class="card-title">📊 Stats</div><div id="appt-stats"></div></div>
       </div>
+    </div>
+  </section>
+
+  <!-- ACTIVITY LOG -->
+  <section id="section-log" class="app-section">
+    <div class="page-wrap">
+      <div class="page-header">
+        <h1>📋 Activity Log</h1>
+        <p>A complete timeline of everything you've tracked — vitals, medications, appointments and more</p>
+      </div>
+
+      <!-- Filter bar -->
+      <div class="log-filters">
+        <button class="log-filter-btn active" onclick="filterLog('all',   this)">All</button>
+        <button class="log-filter-btn"        onclick="filterLog('vitals',this)">💓 Vitals</button>
+        <button class="log-filter-btn"        onclick="filterLog('meds',  this)">💊 Medications</button>
+        <button class="log-filter-btn"        onclick="filterLog('appts', this)">📅 Appointments</button>
+        <button class="log-filter-btn"        onclick="filterLog('alerts',this)">⚠️ Alerts</button>
+        <button class="btn btn-ghost btn-sm"  onclick="exportCSV()" style="margin-left:auto">⬇️ Export CSV</button>
+      </div>
+
+      <!-- Stats row -->
+      <div class="log-stats" id="log-stats"></div>
+
+      <!-- Timeline -->
+      <div class="log-timeline" id="log-timeline"></div>
     </div>
   </section>
 
