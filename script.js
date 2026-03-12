@@ -1,4 +1,11 @@
-﻿// ═══════════════════════════════════════════════════════
+﻿const API_URL = "https://healthai-backend-production-b5ec.up.railway.app/api";
+function getToken(){return localStorage.getItem("healthai_token");}
+async function apiCall(e,t="GET",n=null){const o={"Content-Type":"application/json"},r=getToken();r&&(o.Authorization="Bearer "+r);const i={method:t,headers:o};n&&(i.body=JSON.stringify(n));try{const t=await fetch(API_URL+e,i),n=await t.json();if(!t.ok)throw new Error(n.error||"Failed");return n}catch(e){throw console.warn(e.message),e}}
+async function doLogin(){const e=document.getElementById("login-email")?.value.trim(),t=document.getElementById("login-password")?.value;if(!e||!t){_enterApp();return;}const n=document.querySelector("#page-login .btn-primary");n&&(n.disabled=!0,n.textContent="Signing in...");try{const t=await apiCall("/auth/login","POST",{email:e,password:document.getElementById("login-password").value});localStorage.setItem("healthai_token",t.token);if(t.user){USER.fname=t.user.firstName||USER.fname;USER.lname=t.user.lastName||USER.lname;USER.email=t.user.email||USER.email;}_enterApp();}catch(e){showToast("❌",e.message||"Wrong email or password");n&&(n.disabled=!1,n.textContent="Sign In →");}}
+async function doRegister(){const e=document.getElementById("reg-fname").value.trim(),t=document.getElementById("reg-lname").value.trim(),n=document.getElementById("reg-email")?.value.trim(),r=document.getElementById("reg-password")?.value;if(!e||!t){showToast("⚠️","Please enter First and Last name");return;}USER.fname=e;USER.lname=t;if(document.getElementById("reg-age").value)USER.age=parseInt(document.getElementById("reg-age").value);if(document.getElementById("reg-sex").value)USER.sex=document.getElementById("reg-sex").value;if(document.getElementById("reg-blood").value)USER.blood=document.getElementById("reg-blood").value;if(document.getElementById("reg-height").value)USER.height=parseInt(document.getElementById("reg-height").value);try{const o=await apiCall("/auth/register","POST",{firstName:e,lastName:t,email:n||e+"."+t+"@healthai.com",password:r||"demo1234"});localStorage.setItem("healthai_token",o.token);showToast("🎉","Account created! Welcome to HealthAI");}catch(e){showToast("⚠️","Using offline mode — "+e.message);}document.querySelectorAll(".auth-page").forEach(e=>e.classList.remove("active"));document.getElementById("app").classList.remove("hidden");initApp();navigate("dashboard");}
+function doLogout(){localStorage.removeItem("healthai_token");document.getElementById("app").classList.add("hidden");showAuthPage("page-login");}
+function _enterApp(){document.querySelectorAll(".auth-page").forEach(e=>e.classList.remove("active"));document.getElementById("app").classList.remove("hidden");initApp();navigate("dashboard");}
+// ═══════════════════════════════════════════════════════
 //  script.js — HealthAI Platform  
 // ═══════════════════════════════════════════════════════
 
@@ -219,11 +226,7 @@ async function doRegister() {
   navigate('dashboard');
 }
 
-function doLogout() {
-  localStorage.removeItem('healthai_token');
-  document.getElementById('app').classList.add('hidden');
-  showAuthPage('page-login');
-}
+
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // APP INIT
@@ -2188,4 +2191,5 @@ function showToast(icon, msg) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove('show'), 3200);
 }
+
 
