@@ -4,6 +4,34 @@
 //            Vitals, Symptom Checker, Doctors, Chat, BMI
 // ═══════════════════════════════════════════════════════
 
+// ── BACKEND API CONFIG ────────────────────────────────
+const API_URL = 'https://healthai-backend-production-b5ec.up.railway.app/api';
+
+// Get stored JWT token
+function getToken() {
+  return localStorage.getItem('healthai_token');
+}
+
+// Universal API call helper
+async function apiCall(endpoint, method = 'GET', body = null) {
+  const headers = { 'Content-Type': 'application/json' };
+  const token = getToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const opts = { method, headers };
+  if (body) opts.body = JSON.stringify(body);
+
+  try {
+    const res = await fetch(API_URL + endpoint, opts);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || data.message || 'Request failed');
+    return data;
+  } catch (err) {
+    console.warn('API call failed:', err.message);
+    throw err;
+  }
+}
+
 // ── 1. USER DATA ──────────────────────────────────────
 const USER = {
   fname: 'John', lname: 'Doe',
@@ -82,30 +110,97 @@ function showAuthPage(id) {
   document.getElementById(id).classList.add('active');
 }
 
-function doLogin() {
+async function doLogin() {
+  const email    = document.getElementById('login-email')?.value.trim();
+  const password = document.getElementById('login-password')?.value;
+
+  // If no inputs found (demo mode), just log in directly
+  if (!email || !password) {
+    _enterApp();
+    return;
+  }
+
+  const btn = document.querySelector('#page-login .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'Signing in…'; }
+
+  try {
+    const data = await apiCall('/auth/login', 'POST', { email, password });
+    localStorage.setItem('healthai_token', data.token);
+
+    // Fill USER from backend response
+    if (data.user) {
+      USER.fname  = data.user.firstName || data.user.fname  || USER.fname;
+      USER.lname  = data.user.lastName  || data.user.lname  || USER.lname;
+      USER.email  = data.user.email     || USER.email;
+      USER.age    = data.user.age       || USER.age;
+      USER.sex    = data.user.sex       || USER.sex;
+      USER.blood  = data.user.bloodGroup || data.user.blood_group || USER.blood;
+      USER.height = data.user.heightCm  || data.user.height_cm   || USER.height;
+      USER.weight = data.user.weightKg  || data.user.weight_kg   || USER.weight;
+    }
+    _enterApp();
+  } catch (err) {
+    showToast('❌', err.message || 'Login failed. Check email/password.');
+    if (btn) { btn.disabled = false; btn.textContent = 'Sign In'; }
+  }
+}
+
+function _enterApp() {
   document.querySelectorAll('.auth-page').forEach(p => p.classList.remove('active'));
   document.getElementById('app').classList.remove('hidden');
   initApp();
   navigate('dashboard');
 }
 
-function doRegister() {
-  const fn = document.getElementById('reg-fname').value.trim();
-  const ln = document.getElementById('reg-lname').value.trim();
+async function doRegister() {
+  const fn    = document.getElementById('reg-fname').value.trim();
+  const ln    = document.getElementById('reg-lname').value.trim();
+  const email = document.getElementById('reg-email')?.value.trim();
+  const pass  = document.getElementById('reg-password')?.value;
+
   if (!fn || !ln) { showToast('⚠️', 'Please fill in First and Last name'); return; }
-  USER.fname = fn; USER.lname = ln;
+
+  const btn = document.querySelector('#page-register .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'Creating account…'; }
+
+  // Update local USER object
+  USER.fname  = fn; USER.lname = ln;
   if (document.getElementById('reg-age').value)    USER.age    = parseInt(document.getElementById('reg-age').value);
   if (document.getElementById('reg-sex').value)    USER.sex    = document.getElementById('reg-sex').value;
   if (document.getElementById('reg-blood').value)  USER.blood  = document.getElementById('reg-blood').value;
   if (document.getElementById('reg-height').value) USER.height = parseInt(document.getElementById('reg-height').value);
+  if (email) USER.email = email;
+
+  try {
+    const payload = {
+      firstName:  fn,
+      lastName:   ln,
+      email:      email || `${fn.toLowerCase()}.${ln.toLowerCase()}@healthai.com`,
+      password:   pass  || 'demo1234',
+      age:        USER.age,
+      sex:        USER.sex,
+      bloodGroup: USER.blood,
+      heightCm:   USER.height,
+      weightKg:   USER.weight,
+    };
+    const data = await apiCall('/auth/register', 'POST', payload);
+    localStorage.setItem('healthai_token', data.token);
+    showToast('🎉', 'Account created! Welcome to HealthAI');
+  } catch (err) {
+    // If backend fails, still let them use the app (offline mode)
+    console.warn('Register API error:', err.message);
+    showToast('🎉', 'Welcome to HealthAI! (offline mode)');
+  }
+
+  if (btn) { btn.disabled = false; btn.textContent = 'Create Account'; }
   document.querySelectorAll('.auth-page').forEach(p => p.classList.remove('active'));
   document.getElementById('app').classList.remove('hidden');
   initApp();
   navigate('dashboard');
-  showToast('🎉', 'Account created! Welcome to HealthAI');
 }
 
 function doLogout() {
+  localStorage.removeItem('healthai_token');
   document.getElementById('app').classList.add('hidden');
   showAuthPage('page-login');
 }
@@ -388,8 +483,8 @@ function openLogModal(type) {
   openModal('log-modal');
 }
 
-function saveVitalLog() {
-  let reading = '', type = '';
+async function saveVitalLog() {
+  let reading = '', type = '', apiPayload = null;
   const notes = document.getElementById('log-notes').value;
   const now   = new Date();
   const dateStr = now.toISOString().slice(0,16).replace('T',' ');
@@ -408,6 +503,7 @@ function saveVitalLog() {
     document.getElementById('bp-badge').className = `badge ${bpStatus === 'Normal' ? 'badge-green' : bpStatus === 'Low' ? 'badge-blue' : 'badge-red'}`;
     HISTORY.unshift({ date: dateStr, type, reading, status: bpStatus, notes });
     pushLog('vitals','❤️','#fee2e2','Blood Pressure logged', reading + (notes?' — '+notes:''), reading, bpStatus==='Normal'?'badge-green':'badge-yellow', bpStatus);
+    apiPayload = { type:'bp', systolic:parseInt(s), diastolic:parseInt(d), unit:'mmHg', status:bpStatus, notes, context:'manual' };
   } else if (currentLogType === 'sugar') {
     const g = document.getElementById('log-glucose')?.value;
     if (!g) { showToast('⚠️','Enter a value'); return; }
@@ -419,22 +515,31 @@ function saveVitalLog() {
     document.getElementById('sugar-badge').textContent = sgStatus === 'Normal' ? '✓ Normal (Fasting)' : '⚠️ ' + sgStatus;
     HISTORY.unshift({ date: dateStr, type, reading, status: sgStatus, notes });
     pushLog('vitals','🩸','#fef3c7','Blood Sugar logged', reading + (notes?' — '+notes:''), reading, sgStatus==='Normal'?'badge-green':'badge-red', sgStatus);
+    apiPayload = { type:'sugar', value:parseFloat(g), unit:'mg/dL', status:sgStatus, notes, context: document.getElementById('log-sg-type')?.value || 'fasting' };
   } else if (currentLogType === 'heart') {
     const hr = document.getElementById('log-hr')?.value;
     if (!hr) { showToast('⚠️','Enter a value'); return; }
     reading = `${hr} bpm`; type = 'Heart Rate';
     HISTORY.unshift({ date: dateStr, type, reading, status: 'Normal', notes });
+    apiPayload = { type:'heart_rate', value:parseFloat(hr), unit:'bpm', status:'Normal', notes };
   } else if (currentLogType === 'temp') {
     const t = document.getElementById('log-temp')?.value;
     if (!t) { showToast('⚠️','Enter a value'); return; }
     reading = `${t}°C`; type = 'Temperature';
     const status = parseFloat(t) < 36 ? 'Low' : parseFloat(t) <= 37.5 ? 'Normal' : 'High';
     HISTORY.unshift({ date: dateStr, type, reading, status, notes });
+    apiPayload = { type:'temp', value:parseFloat(t), unit:'°C', status, notes };
   } else if (currentLogType === 'spo2') {
     const o = document.getElementById('log-spo2')?.value;
     if (!o) { showToast('⚠️','Enter a value'); return; }
     reading = `${o}%`; type = 'SpO2';
     HISTORY.unshift({ date: dateStr, type, reading, status: 'Normal', notes });
+    apiPayload = { type:'spo2', value:parseFloat(o), unit:'%', status:'Normal', notes };
+  }
+
+  // Save to backend (silently — don't block the UI if it fails)
+  if (apiPayload && getToken()) {
+    apiCall('/vitals', 'POST', apiPayload).catch(err => console.warn('Vitals save failed:', err.message));
   }
 
   renderHistory();
